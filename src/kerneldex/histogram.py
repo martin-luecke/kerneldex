@@ -1,7 +1,8 @@
 """Aggregate mnemonics across a captured kernel corpus.
 
-Input:  a directory that contains ``.hsaco`` files (the output of
-``kerneldex capture``).
+Input:  a dex directory whose ``kernels/`` subdirectory contains ``.hsaco``
+or ``.co`` files (as produced by ``kerneldex capture`` or
+``kerneldex import``).
 
 Output:
   - ``<out>/reports/mnemonic_histogram.csv``
@@ -16,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .disasm import disassemble
-from .paths import resolve_dex
+from .paths import find_kernels, resolve_dex
 
 
 @dataclass(frozen=True)
@@ -32,9 +33,11 @@ def build_histogram(dex_dir: Path, objdump: str | None = None) -> HistogramResul
     kernels_dir, reports_dir = resolve_dex(Path(dex_dir))
     reports_dir.mkdir(parents=True, exist_ok=True)
 
-    hsaco_files = sorted(kernels_dir.glob("*.hsaco"))
+    hsaco_files = find_kernels(kernels_dir)
     if not hsaco_files:
-        raise FileNotFoundError(f"no .hsaco files in {kernels_dir}")
+        raise FileNotFoundError(
+            f"no .hsaco or .co files in {kernels_dir}"
+        )
 
     global_counts: Counter[str] = Counter()
     kernels_per_mnemonic: defaultdict[str, set[str]] = defaultdict(set)

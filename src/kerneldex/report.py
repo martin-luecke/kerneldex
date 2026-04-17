@@ -48,7 +48,7 @@ def _read_manifest(path: Path) -> list[dict]:
     return rows
 
 
-def _inventory_table(manifest_rows: list[dict]) -> list[list[str]]:
+def _captured_inventory_table(manifest_rows: list[dict]) -> list[list[str]]:
     seen: dict[str, dict] = {}
     for r in manifest_rows:
         if r.get("status") != "ok":
@@ -64,6 +64,27 @@ def _inventory_table(manifest_rows: list[dict]) -> list[list[str]]:
             r.get("module", "?"),
             key,
             hsaco,
+        ])
+    return out
+
+
+def _imported_inventory_table(manifest_rows: list[dict]) -> list[list[str]]:
+    """File-level inventory for an imported corpus.
+
+    Per-kernel names inside each code object aren't known at ingest time
+    (each ``.co`` may contain many kernels), so this table is
+    one-row-per-file: the original relpath, short hash, size, and the
+    flattened filename that now lives under ``kernels/``.
+    """
+    out = [["original path", "hash", "size (bytes)", "file"]]
+    rows = [r for r in manifest_rows if r.get("status") == "imported"]
+    rows.sort(key=lambda r: r.get("original_relpath", ""))
+    for r in rows:
+        out.append([
+            r.get("original_relpath", "?"),
+            (r.get("sha256") or "")[:12],
+            str(r.get("size", "")),
+            Path(r.get("hsaco_file") or "").name,
         ])
     return out
 
@@ -107,30 +128,52 @@ def render(dex_dir: Path) -> Path:
     manifest = _read_manifest(kernels_dir / "manifest.jsonl")
 
     installs = [r for r in manifest if r.get("status") == "install"]
-    target = installs[-1]["target"] if installs else "(unknown)"
-    backend = installs[-1].get("backend", "(unknown)") if installs else "(unknown)"
+    imports = [r for r in manifest if r.get("status") == "import"]
+    is_imported = bool(imports) and not installs
+
+    if is_imported:
+        header = imports[-1]
+        target = header.get("target") or "(unknown)"
+        source = header.get("source", "(unknown)")
+        mode = header.get("mode", "?")
+    else:
+        target = installs[-1]["target"] if installs else "(unknown)"
+        backend = installs[-1].get("backend", "(unknown)") if installs else "(unknown)"
 
     n_ok = sum(1 for r in manifest if r.get("status") == "ok")
     n_unique_ok = len({r["key"] for r in manifest if r.get("status") == "ok" and r.get("key")})
     n_fail = sum(1 for r in manifest if r.get("status") == "fail")
     n_ok_no_hsaco = sum(1 for r in manifest if r.get("status") == "ok_no_hsaco")
+    n_imported = sum(1 for r in manifest if r.get("status") == "imported")
+    n_duplicates = sum(1 for r in manifest if r.get("status") == "duplicate")
 
     parts: list[str] = []
     parts.append(f"# kerneldex report: {target}\n")
-    parts.append(
-        f"- target: `{target}` (backend `{backend}`)\n"
-        f"- compile attempts logged: {n_ok + n_fail + n_ok_no_hsaco}\n"
-        f"- unique kernels captured: {n_unique_ok}\n"
-        f"- compile failures recorded: {n_fail}\n"
-    )
-    if n_ok_no_hsaco:
+    if is_imported:
         parts.append(
-            f"- compiles missing an hsaco blob (could not be cataloged): "
-            f"{n_ok_no_hsaco}\n"
+            f"- source: `{source}` (imported, mode `{mode}`)\n"
+            f"- target: `{target}`\n"
+            f"- code objects ingested: {n_imported}\n"
+            f"- duplicates skipped: {n_duplicates}\n"
         )
+    else:
+        parts.append(
+            f"- target: `{target}` (backend `{backend}`)\n"
+            f"- compile attempts logged: {n_ok + n_fail + n_ok_no_hsaco}\n"
+            f"- unique kernels captured: {n_unique_ok}\n"
+            f"- compile failures recorded: {n_fail}\n"
+        )
+        if n_ok_no_hsaco:
+            parts.append(
+                f"- compiles missing an hsaco blob (could not be cataloged): "
+                f"{n_ok_no_hsaco}\n"
+            )
 
     parts.append("\n## Kernel inventory\n\n")
-    parts.append(_md_table(_inventory_table(manifest)))
+    if is_imported:
+        parts.append(_md_table(_imported_inventory_table(manifest)))
+    else:
+        parts.append(_md_table(_captured_inventory_table(manifest)))
     parts.append(
         "\n\nFull manifest: [kernels/manifest.jsonl](kernels/manifest.jsonl).\n"
     )
@@ -153,7 +196,7 @@ def render(dex_dir: Path) -> Path:
     cov_csv = reports_dir / "coverage.csv"
     if cov_csv.exists():
         cov_rows = _read_coverage(cov_csv)
-        parts.append("\n## Translator coverage\n\n")
+        parts.append("\n## Coverage\n\n")
         parts.append(_md_table(
             [["file", "kernel", "outcome", "blocker"]]
             + [

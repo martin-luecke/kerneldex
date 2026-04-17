@@ -8,9 +8,11 @@ kerneldex answers one question as precisely as possible:
 
 > **"What GPU instructions does *my* workload produce on target ISA *X*?"**
 
-Point it at any Python program that uses Triton. kerneldex intercepts every
-Triton compilation, redirects it at the target ISA you asked about, stores
-the resulting HSA code objects, and then (offline) gives you:
+Point it at any Python program that uses Triton, or at an existing
+directory of pre-built `.hsaco` / `.co` code objects. kerneldex either
+intercepts every Triton compilation (redirecting it at the target ISA
+you asked about) or ingests the pre-built corpus, and then (offline)
+gives you:
 
 - A per-kernel inventory with content-addressed hashes.
 - A mnemonic histogram across the whole corpus plus per-kernel breakdowns.
@@ -67,6 +69,8 @@ module.
 
 ## Quickstart
 
+### Triton workload (live capture)
+
 Capture, summarize, report - three one-liners:
 
 ```
@@ -82,8 +86,26 @@ kerneldex histogram ./dex
 kerneldex report ./dex
 ```
 
-Optional fourth step - per-kernel coverage, if you have a tool to point
-at:
+### Pre-built corpus (import)
+
+If you already have a directory of `.hsaco` / `.co` files (e.g.
+precompiled CK kernels, JIT cache dumps, vendor-shipped code objects),
+skip `capture` and use `import` instead:
+
+```
+kerneldex import /path/to/corpus --out ./dex --target gfx950
+kerneldex histogram ./dex
+kerneldex report ./dex
+```
+
+`import` walks the source recursively, deduplicates by content hash,
+and drops every code object into `./dex/kernels/` under a flattened,
+collision-free name. By default it creates symlinks (fast, no disk
+cost); pass `--mode copy` for a self-contained dex.
+
+### Coverage (optional)
+
+Per-kernel coverage, if you have a tool to point at:
 
 ```
 kerneldex coverage ./dex \
@@ -258,6 +280,9 @@ These are intentional tradeoffs, not bugs, but worth calling out up front.
 kerneldex capture --target <arch> --out <dir> \
                   [--backend hip] [--warp-size N] [--trace] \
                   -- <python> <script.py> [args...]
+
+kerneldex import  <source-dir> --out <dir> \
+                  [--target <arch>] [--mode symlink|copy] [--force]
 
 kerneldex histogram <dir> [--objdump <path>]
 

@@ -1,15 +1,16 @@
 """kerneldex command-line interface.
 
-Four subcommands:
+Five subcommands:
 
     kerneldex capture   - run a user script with the compile hook installed
-    kerneldex histogram - disassemble captured kernels and aggregate mnemonics
+    kerneldex import    - ingest a directory of existing .hsaco/.co files
+    kerneldex histogram - disassemble kernels and aggregate mnemonics
     kerneldex coverage  - run an external tool over every captured kernel
     kerneldex report    - render a human-readable markdown report
 
 Each command operates on a "dex directory" that contains a ``kernels/``
-subdirectory (produced by capture) and optionally a ``reports/`` subdirectory
-(produced by histogram / coverage).
+subdirectory (produced by ``capture`` or ``import``) and optionally a
+``reports/`` subdirectory (produced by ``histogram`` / ``coverage``).
 """
 from __future__ import annotations
 
@@ -22,6 +23,7 @@ from pathlib import Path
 from . import hook as hook_mod
 from . import coverage as coverage_mod
 from . import histogram as histogram_mod
+from . import ingest as ingest_mod
 from . import report as report_mod
 
 
@@ -68,6 +70,27 @@ def _cmd_capture(args: argparse.Namespace) -> int:
     )
     proc = subprocess.run(wrapped, env=env)
     return proc.returncode
+
+
+def _cmd_import(args: argparse.Namespace) -> int:
+    try:
+        result = ingest_mod.ingest_corpus(
+            Path(args.source),
+            Path(args.out),
+            mode=args.mode,
+            target=args.target,
+            force=args.force,
+        )
+    except ingest_mod.IngestError as exc:
+        print(f"kerneldex import: error: {exc}", file=sys.stderr)
+        return 2
+    print(
+        f"[kerneldex] import: {result.n_imported} kernels ingested "
+        f"({result.n_duplicates} duplicates skipped, "
+        f"{result.total_bytes / 1e6:.1f} MB), mode={args.mode}",
+    )
+    print(f"  {result.manifest_path}")
+    return 0
 
 
 def _cmd_histogram(args: argparse.Namespace) -> int:
@@ -137,6 +160,30 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="The user program, preceded by ``--``. The first "
                          "token must be a python interpreter.")
     pc.set_defaults(func=_cmd_capture)
+
+    # import ---------------------------------------------------------------
+    pi = sub.add_parser(
+        "import",
+        help="Ingest a directory of existing .hsaco/.co files into a dex.",
+        description="Walk <source> recursively, deduplicate by content hash, "
+                    "and drop every .hsaco/.co into <out>/kernels/ so the "
+                    "rest of the kerneldex pipeline can run against a corpus "
+                    "that was not produced by `capture`.",
+    )
+    pi.add_argument("source",
+                    help="Directory to ingest. Searched recursively.")
+    pi.add_argument("--out", required=True,
+                    help="Top-level dex directory to create or populate.")
+    pi.add_argument("--target", default=None,
+                    help="Target architecture recorded in the manifest, e.g. "
+                         "gfx950. Surfaced by `kerneldex report`.")
+    pi.add_argument("--mode", choices=("symlink", "copy"), default="symlink",
+                    help="How to place files under <out>/kernels/. "
+                         "symlink is fast and costs no disk but breaks if "
+                         "the source moves; copy is self-contained.")
+    pi.add_argument("--force", action="store_true",
+                    help="Wipe <out>/kernels/ contents before ingesting.")
+    pi.set_defaults(func=_cmd_import)
 
     # histogram ------------------------------------------------------------
     ph = sub.add_parser(

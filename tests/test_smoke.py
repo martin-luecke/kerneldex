@@ -21,7 +21,8 @@ sys.path.insert(0, str(SRC))
 from kerneldex import hook  # noqa: E402
 from kerneldex.cli import _build_parser  # noqa: E402
 from kerneldex.coverage import _parse_stdout  # noqa: E402
-from kerneldex.paths import resolve_dex  # noqa: E402
+from kerneldex.ingest import IngestError, ingest_corpus  # noqa: E402
+from kerneldex.paths import find_kernels, resolve_dex  # noqa: E402
 from kerneldex.report import render  # noqa: E402
 
 
@@ -136,6 +137,105 @@ def test_override_target_preserves_src_and_kwargs(
     assert merged["options"] is None
     # Unknown kwarg must pass through unchanged.
     assert merged["extra_future_kwarg"] == 42
+
+
+def test_find_kernels_matches_both_extensions(tmp_path: Path) -> None:
+    (tmp_path / "a.hsaco").write_bytes(b"\x7fELF-hsaco")
+    (tmp_path / "b.co").write_bytes(b"\x7fELF-co")
+    (tmp_path / "c.txt").write_text("ignored")
+    names = [p.name for p in find_kernels(tmp_path)]
+    assert names == ["a.hsaco", "b.co"]
+
+
+def _write_fake_co(path: Path, payload: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(payload)
+
+
+def test_ingest_roundtrip_symlink(tmp_path: Path) -> None:
+    src = tmp_path / "src"
+    _write_fake_co(src / "bf16gemm" / "bf16gemm_tn_256.co", b"PAYLOAD_A")
+    _write_fake_co(src / "fmha_v3_fwd" / "fwd_hd128.co", b"PAYLOAD_B")
+    _write_fake_co(src / "top_level.hsaco", b"PAYLOAD_C")
+
+    out = tmp_path / "dex"
+    result = ingest_corpus(src, out, mode="symlink", target="gfx950")
+
+    assert result.n_scanned == 3
+    assert result.n_imported == 3
+    assert result.n_duplicates == 0
+    kernels = find_kernels(out / "kernels")
+    assert len(kernels) == 3
+    assert all(p.is_symlink() for p in kernels)
+
+    # manifest has an "import" header then one "imported" row per file.
+    rows = [json.loads(l) for l in (out / "kernels" / "manifest.jsonl").read_text().splitlines()]
+    assert rows[0]["status"] == "import"
+    assert rows[0]["target"] == "gfx950"
+    assert rows[0]["mode"] == "symlink"
+    imported = [r for r in rows if r["status"] == "imported"]
+    assert len(imported) == 3
+    # Flattened relpath shows up in the ingested filename.
+    names = {Path(r["hsaco_file"]).name for r in imported}
+    assert any(n.startswith("bf16gemm__bf16gemm_tn_256_") for n in names)
+    assert any(n.startswith("fmha_v3_fwd__fwd_hd128_") for n in names)
+
+
+def test_ingest_dedupes_by_content_hash(tmp_path: Path) -> None:
+    src = tmp_path / "src"
+    _write_fake_co(src / "a" / "kernel.co", b"SAME_CONTENT")
+    _write_fake_co(src / "b" / "kernel.co", b"SAME_CONTENT")
+    _write_fake_co(src / "c.co", b"DIFFERENT")
+
+    result = ingest_corpus(src, tmp_path / "dex", mode="copy")
+    assert result.n_scanned == 3
+    assert result.n_imported == 2
+    assert result.n_duplicates == 1
+
+    rows = [json.loads(l) for l in (result.manifest_path).read_text().splitlines()]
+    dupes = [r for r in rows if r["status"] == "duplicate"]
+    assert len(dupes) == 1
+    assert dupes[0]["canonical"].startswith("kernels/")
+
+
+def test_ingest_refuses_populated_dex_without_force(tmp_path: Path) -> None:
+    src = tmp_path / "src"
+    _write_fake_co(src / "x.co", b"X")
+    dex = tmp_path / "dex"
+    ingest_corpus(src, dex, mode="copy")
+    with pytest.raises(IngestError):
+        ingest_corpus(src, dex, mode="copy")
+    # With force=True, re-ingest succeeds.
+    result = ingest_corpus(src, dex, mode="copy", force=True)
+    assert result.n_imported == 1
+
+
+def test_ingest_rejects_bad_mode(tmp_path: Path) -> None:
+    src = tmp_path / "src"
+    _write_fake_co(src / "x.co", b"X")
+    with pytest.raises(IngestError):
+        ingest_corpus(src, tmp_path / "dex", mode="hardlink")
+
+
+def test_ingest_rejects_empty_corpus(tmp_path: Path) -> None:
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "readme.md").write_text("no code objects here")
+    with pytest.raises(IngestError):
+        ingest_corpus(src, tmp_path / "dex")
+
+
+def test_report_renders_imported_corpus(tmp_path: Path) -> None:
+    """Imported manifests should produce a file-level inventory in REPORT.md."""
+    src = tmp_path / "src"
+    _write_fake_co(src / "bf16gemm" / "k.co", b"AAA")
+    ingest_corpus(src, tmp_path / "dex", mode="copy", target="gfx950")
+    out = render(tmp_path / "dex")
+    text = out.read_text()
+    assert "gfx950" in text
+    assert "imported" in text
+    assert "bf16gemm/k.co" in text
+    assert "original path" in text  # file-level inventory header
 
 
 def test_report_renders_on_empty_dex(tmp_path: Path) -> None:

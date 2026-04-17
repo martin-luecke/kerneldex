@@ -14,6 +14,8 @@ manual lists. kerneldex automates that measurement.
 
 **In scope (v0.x):**
 - Triton kernels compiled via `triton.compiler.compiler.compile`.
+- Pre-built AMDGPU code objects (`.hsaco` / `.co`) ingested from an
+  existing directory via `kerneldex import`.
 - AMDGPU targets (the code object format we persist is HSA `.hsaco`).
 - Offline analysis: instruction histograms and pluggable per-kernel coverage.
 
@@ -122,7 +124,15 @@ reduced fidelity.
             └── reports/     (created by the next stages)
 ```
 
-After capture, three read-only stages operate on `dex/`:
+An alternative first stage is `kerneldex import <source-dir> --out <dex>`,
+which walks an existing directory of code objects (any mix of `.hsaco`
+and `.co`), deduplicates them by SHA-256, and populates
+`<dex>/kernels/` with flattened, collision-free filenames. It writes a
+`manifest.jsonl` whose header row carries `status: "import"` and the
+recorded target. The file-level analogue of `capture`'s per-kernel
+manifest is a per-file row with the original relpath, hash, and size.
+
+After capture *or* import, three read-only stages operate on `dex/`:
 
 - **`histogram`**: walks `kernels/*.hsaco`, shells out to `llvm-objdump`,
   tokenizes mnemonics, writes `reports/mnemonic_histogram.csv` (global)

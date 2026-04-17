@@ -36,7 +36,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from .paths import resolve_dex
+from .paths import find_kernels, resolve_dex
 
 # A kernel-name token: must start with a letter or underscore and contain only
 # identifier-like characters. This keeps us from matching summary prose such
@@ -129,9 +129,11 @@ def run_coverage(
     reports_dir.mkdir(parents=True, exist_ok=True)
 
     extras = list(extra_args or [])
-    hsaco_files = sorted(kernels_dir.glob("*.hsaco"))
+    hsaco_files = find_kernels(kernels_dir)
     if not hsaco_files:
-        raise FileNotFoundError(f"no .hsaco files in {kernels_dir}")
+        raise FileNotFoundError(
+            f"no .hsaco or .co files in {kernels_dir}"
+        )
 
     rows: list[CoverageRow] = []
     for hf in hsaco_files:
