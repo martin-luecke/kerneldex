@@ -1,0 +1,32 @@
+# Python build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.eggs/
+.tox/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# kerneldex output: default workspace directory used by quickstart / examples.
+# Users can of course point --out somewhere else; this just covers the common
+# in-repo case.
+dex/
+*.hsaco
+*.dex/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store

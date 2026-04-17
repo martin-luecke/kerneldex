@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kerneldex"
+version = "0.1.0"
+description = "Catalog the GPU kernels a Triton / torch.compile workload emits for a target ISA, with instruction histograms and optional translator-coverage."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [
+    { name = "kerneldex contributors" },
+]
+keywords = ["triton", "rocm", "amdgpu", "isa", "disassembly", "kernel"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Compilers",
+    "Topic :: Software Development :: Debuggers",
+    "Topic :: System :: Hardware",
+]
+
+# kerneldex has ZERO hard Python dependencies by design: it wraps existing
+# toolchain pieces (your Triton install + llvm-objdump) rather than reimplementing
+# them. See README for the external requirements.
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+]
+
+[project.scripts]
+kerneldex = "kerneldex.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/martin-luecke/kerneldex"
+Source   = "https://github.com/martin-luecke/kerneldex"
+Issues   = "https://github.com/martin-luecke/kerneldex/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+kerneldex = ["py.typed"]
