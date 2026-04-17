@@ -1,14 +1,13 @@
-"""Pluggable translator-coverage runner.
+"""Pluggable per-kernel coverage runner.
 
-kerneldex itself has no opinion on what "coverage" means - it just invokes an
-external binary (a "raiser", or in general anything that accepts an ``.hsaco``
-and tells you whether it can process it) once per captured kernel and parses
-the result.
+kerneldex itself has no opinion on what "coverage" means - it just invokes
+an external binary that accepts an ``.hsaco`` and tells you whether it can
+process it, once per captured kernel, and parses the result.
 
 Protocol the external tool must satisfy:
 
 * Invoked as ``<binary> <hsaco_path> [extra args...]`` (extras are forwarded
-  through the CLI with ``--raiser-arg``).
+  through the CLI with ``--tool-arg``).
 * Exit 0 means every kernel in the code object was handled successfully.
 * Non-zero exit means at least one kernel failed. kerneldex captures the
   return code and the last line of stderr (a human-readable reason).
@@ -114,11 +113,11 @@ def _first_unsupported(text: str) -> tuple[str, str] | None:
 
 def run_coverage(
     dex_dir: Path,
-    raiser: Path,
+    tool: Path,
     extra_args: list[str] | None = None,
     timeout: float | None = 300.0,
 ) -> Path:
-    """Run ``raiser`` on every captured ``.hsaco`` under ``dex_dir``.
+    """Run ``tool`` on every captured ``.hsaco`` under ``dex_dir``.
 
     :param timeout: Per-kernel wall-clock limit in seconds. ``None`` disables
         the timeout. Timed-out kernels are recorded as ``timeout:<seconds>``
@@ -138,7 +137,7 @@ def run_coverage(
     for hf in hsaco_files:
         try:
             proc = subprocess.run(
-                [str(raiser), str(hf), *extras],
+                [str(tool), str(hf), *extras],
                 capture_output=True,
                 text=True,
                 timeout=timeout,

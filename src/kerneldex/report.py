@@ -2,9 +2,8 @@
 
 The report is intentionally minimal and deterministic: it summarizes the
 corpus, embeds the top-N mnemonics inline, and (if coverage.csv exists)
-reports per-kernel translator-coverage results plus a prioritized missing-
-handler worklist. It links to the underlying CSV / JSONL files for full
-detail.
+reports per-kernel coverage results plus a prioritized missing-handler
+worklist. It links to the underlying CSV / JSONL files for full detail.
 """
 from __future__ import annotations
 

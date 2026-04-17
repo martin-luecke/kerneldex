@@ -1,7 +1,8 @@
 # kerneldex
 
 *Catalog the GPU kernels a Triton workload emits for a target ISA, with
-instruction histograms and optional translator-coverage.*
+instruction histograms and optional per-kernel coverage against an
+external tool.*
 
 kerneldex answers one question as precisely as possible:
 
@@ -13,9 +14,9 @@ the resulting HSA code objects, and then (offline) gives you:
 
 - A per-kernel inventory with content-addressed hashes.
 - A mnemonic histogram across the whole corpus plus per-kernel breakdowns.
-- Optional translator-coverage against any external raiser/lifter you point
-  it at, with a prioritized list of the missing handlers that block the
-  most kernels.
+- Optional per-kernel coverage against any external tool you point it at,
+  with a prioritized list of the missing handlers that block the most
+  kernels.
 
 The tool is deliberately small, principled, and Triton-only in v0.x.
 
@@ -41,11 +42,10 @@ missing at the point it's needed.
    (e.g. LLVM 14) crash on `gfx1250` code objects. Install a recent LLVM
    and either put it on `$PATH`, pass `--objdump /path/to/llvm-objdump`,
    or set `$KERNELDEX_OBJDUMP`.
-4. **(Optional) An external raiser/translator binary** if you want the
-   `coverage` subcommand. kerneldex invokes it as
-   `<binary> <hsaco_path> [extra args...]` and parses a simple stdout
-   protocol; see [`docs/design.md`](docs/design.md#architecture) for
-   details.
+4. **(Optional) An external tool** if you want the `coverage` subcommand.
+   kerneldex invokes it as `<binary> <hsaco_path> [extra args...]` and
+   parses a simple stdout protocol; see
+   [`docs/design.md`](docs/design.md#architecture) for details.
 
 kerneldex itself has no Python runtime dependencies beyond the standard
 library.
@@ -82,14 +82,14 @@ kerneldex histogram ./dex
 kerneldex report ./dex
 ```
 
-Optional fourth step - translator coverage, if you have a raiser to point
+Optional fourth step - per-kernel coverage, if you have a tool to point
 at:
 
 ```
 kerneldex coverage ./dex \
-    --raiser /path/to/your/raiser \
-    --raiser-arg --isa=gfx1250 \
-    --raiser-arg --verbose
+    --tool /path/to/your/tool \
+    --tool-arg --isa=gfx1250 \
+    --tool-arg --verbose
 kerneldex report ./dex      # re-render; now includes the coverage table
 ```
 
@@ -106,6 +106,113 @@ dex/
     ├── per_kernel_mnemonics.jsonl   # per-kernel mnemonic counts
     └── coverage.csv                 # present iff you ran `coverage`
 ```
+
+---
+
+## Example output
+
+Running the quickstart against `examples/trivial_add.py` for `gfx1250`
+produces a `REPORT.md` that looks like this (abbreviated):
+
+```markdown
+# kerneldex report: gfx1250
+
+- target: `gfx1250` (backend `hip`)
+- compile attempts logged: 1
+- unique kernels captured: 1
+- compile failures recorded: 0
+
+## Kernel inventory
+
+| kernel symbol | source module | hash         | hsaco                            |
+|---------------|---------------|--------------|----------------------------------|
+| add_kernel    | __main__      | fe89a7d063d7 | add_kernel_fe89a7d063d7.hsaco    |
+
+## Mnemonic histogram (top 25)
+
+| mnemonic             | total | num_kernels |
+|----------------------|-------|-------------|
+| s_code_end           | 111   | 1           |
+| s_mov_b32            | 4     | 1           |
+| s_wait_xcnt          | 3     | 1           |
+| buffer_load_b32      | 2     | 1           |
+| s_lshl_b32           | 2     | 1           |
+| ...                  | ...   | ...         |
+| v_add_f32_e32        | 1     | 1           |
+| v_cndmask_b32_e32    | 1     | 1           |
+
+- 24 unique mnemonics total
+```
+
+`reports/mnemonic_histogram.csv` is the sorted long form of that table:
+
+```csv
+mnemonic,total_count,num_kernels,kernels
+s_code_end,111,1,add_kernel_fe89a7d063d7.hsaco
+s_mov_b32,4,1,add_kernel_fe89a7d063d7.hsaco
+s_wait_xcnt,3,1,add_kernel_fe89a7d063d7.hsaco
+buffer_load_b32,2,1,add_kernel_fe89a7d063d7.hsaco
+...
+```
+
+`reports/per_kernel_mnemonics.jsonl` has one line per captured kernel,
+suitable for piping to `jq` or further processing:
+
+```json
+{"kernel": "add_kernel_fe89a7d063d7.hsaco", "unique_mnemonics": 24, "total_instructions": 142, "mnemonics": {"s_code_end": 111, "s_mov_b32": 4, ...}}
+```
+
+If you also run `kerneldex coverage`, the report gains two more sections:
+a per-kernel outcome table (`ok` / `fail` / `crash:<rc>` / `timeout:<s>` /
+`unknown`) and a **prioritized missing-handler worklist** grouping failures
+by `(mnemonic, format)` and sorting them by how many kernels a single
+handler would unblock - the greedy worklist is the deliverable most people
+actually care about:
+
+```markdown
+## Prioritized missing-handler worklist
+
+| mnemonic        | format | kernels unblocked | kernels                       |
+|-----------------|--------|-------------------|-------------------------------|
+| v_add_lshl_u32  | VOP3   | 4                 | reduce_a, reduce_b, downcast, ... |
+| s_bfe_i32       | SOP2   | 3                 | matmul_bf16, matmul_mxfp4_a, ... |
+| v_mov_b64       | VOP1   | 1                 | bitmatrix_stage1              |
+```
+
+---
+
+## How the coverage step works
+
+`kerneldex coverage` has no opinion on what "coverage" means. It invokes
+an external binary you supply once per captured `.hsaco`, in an isolated
+subprocess:
+
+```
+<your-binary> <path/to/kernel.hsaco> [extra args via --tool-arg ...]
+```
+
+and infers the per-kernel outcome from the exit code and stdout:
+
+- exit 0 → `ok`
+- non-zero exit → `crash:<rc>` (with the last stderr line attached as a note)
+- timeout → `timeout:<seconds>`
+- your tool printed `OK <kernel-name>` on stdout → `ok` (optionally with a
+  `(lifted/total)` count)
+- your tool printed `FAIL <kernel-name> ... -> <mnem> [<fmt>]` → `fail`,
+  and `<mnem>`/`<fmt>` feed the missing-handler worklist
+
+Typical things to plug in:
+
+- a lifter that raises AMDGPU machine code back to higher-level IR;
+- a validator that asserts the kernel uses only instructions your
+  simulator / emulator / interpreter supports;
+- a static analyzer looking for specific opcodes or patterns;
+- any custom `.hsaco`-consuming tool whose coverage against real
+  Triton workloads you want to measure.
+
+Exit codes alone are enough to get a usable report (`ok` / `crash:<rc>`);
+printing `OK` / `FAIL` lines just gets you per-kernel granularity and the
+mnemonic-level worklist.
 
 ---
 
@@ -154,7 +261,7 @@ kerneldex capture --target <arch> --out <dir> \
 
 kerneldex histogram <dir> [--objdump <path>]
 
-kerneldex coverage  <dir> --raiser <path> [--raiser-arg <arg> ...]
+kerneldex coverage  <dir> --tool <path> [--tool-arg <arg> ...]
 
 kerneldex report    <dir>
 ```

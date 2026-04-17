@@ -5,8 +5,8 @@
 Answer a single question, precisely: **"What GPU instructions does *my*
 workload produce on target ISA *X*?"**
 
-A typical use case is transpiler / translator bring-up on a new AMDGPU
-architecture: before writing handlers, you want to know which mnemonics
+A typical use case is bringing up new codegen or analysis tooling for a
+target ISA: before writing handlers, you want to know which mnemonics
 actually show up in the kernels the workload emits, not the ones the ISA
 manual lists. kerneldex automates that measurement.
 
@@ -15,7 +15,7 @@ manual lists. kerneldex automates that measurement.
 **In scope (v0.x):**
 - Triton kernels compiled via `triton.compiler.compiler.compile`.
 - AMDGPU targets (the code object format we persist is HSA `.hsaco`).
-- Offline analysis: instruction histograms and pluggable translator-coverage.
+- Offline analysis: instruction histograms and pluggable per-kernel coverage.
 
 **Explicitly out of scope (for now):**
 - Gluon, direct-MLIR, or pure-LLVM kernel paths.
@@ -25,7 +25,7 @@ manual lists. kerneldex automates that measurement.
   AMDGPU-specific today).
 - Runtime profiling, performance counters, timing. kerneldex is a static
   corpus tool, not a profiler.
-- Shipping our own translator or lifter. Coverage is pluggable.
+- Bundling our own coverage tool. Coverage is pluggable.
 
 ## Principles
 
@@ -50,20 +50,22 @@ meaningless.
 
 ### 3. Subprocess isolation at stage boundaries
 
-The translator / raiser is the process most likely to crash hard - it is
-often under active development and may hit fatal asserts on exotic
-inputs. We run it in a child process per kernel so one crash never eats
-the whole corpus. The same isolation is available (and encouraged) at
-the capture layer when driving many independent workloads, but we leave
-that to the user to orchestrate because capture is inherently Python-
-native and benefits from shared JIT caches within a run.
+The external coverage tool is the process most likely to crash hard -
+it is often under active development and may hit fatal asserts on
+exotic inputs. We run it in a child process per kernel so one crash
+never eats the whole corpus. The same isolation is available (and
+encouraged) at the capture layer when driving many independent
+workloads, but we leave that to the user to orchestrate because capture
+is inherently Python-native and benefits from shared JIT caches within
+a run.
 
 ### 4. Pluggable coverage, zero opinion
 
-kerneldex ships no lifter, no raiser, no disassembler analysis beyond
-mnemonic counting. It invokes what the user already has and parses a
-deliberately simple stdout protocol. This keeps the package boundary
-narrow and avoids tying kerneldex to any specific translator's API.
+kerneldex ships no coverage tool of its own and no disassembler
+analysis beyond mnemonic counting. It invokes what the user already has
+and parses a deliberately simple stdout protocol. This keeps the
+package boundary narrow and avoids tying kerneldex to any specific
+tool's API.
 
 ### 5. Deterministic, diffable outputs
 
@@ -79,7 +81,7 @@ narrow and avoids tying kerneldex to any specific translator's API.
 The user is responsible for:
 - A Triton install that supports the target ISA.
 - An `llvm-objdump` that supports the target ISA.
-- A translator binary for coverage (if desired).
+- An external tool for coverage (if desired).
 
 kerneldex refuses to start (with a clear error) when any of these is
 missing at the point it's needed, instead of pretending to work with
@@ -127,7 +129,7 @@ After capture, three read-only stages operate on `dex/`:
   and `reports/per_kernel_mnemonics.jsonl` (per-kernel).
 
 - **`coverage`**: walks `kernels/*.hsaco`, spawns the user-supplied
-  raiser per kernel (isolated subprocess), parses a simple stdout
+  tool per kernel (isolated subprocess), parses a simple stdout
   protocol, writes `reports/coverage.csv`. Tool crashes are surfaced as
   `crash:<rc>` rows with the last stderr line attached.
 
@@ -139,7 +141,7 @@ After capture, three read-only stages operate on `dex/`:
 ## Non-goals
 
 - **Automatic remediation.** kerneldex reports what's missing; fixing
-  handlers is a job for the translator / codegen developer. The worklist
+  handlers is a job for the codegen / tool developer. The worklist
   intentionally stops at "handler X unblocks these N kernels" - it does
   not suggest ISA semantics or handler code.
 - **Comparison across runs.** Not in v0.x. The deterministic outputs are

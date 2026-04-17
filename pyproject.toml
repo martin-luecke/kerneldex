@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "kerneldex"
 version = "0.1.0"
-description = "Catalog the GPU kernels a Triton / torch.compile workload emits for a target ISA, with instruction histograms and optional translator-coverage."
+description = "Catalog the GPU kernels a Triton / torch.compile workload emits for a target ISA, with instruction histograms and optional per-kernel coverage against an external tool."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }

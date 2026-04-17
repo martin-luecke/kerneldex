@@ -4,7 +4,7 @@ Four subcommands:
 
     kerneldex capture   - run a user script with the compile hook installed
     kerneldex histogram - disassemble captured kernels and aggregate mnemonics
-    kerneldex coverage  - run an external raiser/translator over the corpus
+    kerneldex coverage  - run an external tool over every captured kernel
     kerneldex report    - render a human-readable markdown report
 
 Each command operates on a "dex directory" that contains a ``kernels/``
@@ -83,17 +83,17 @@ def _cmd_histogram(args: argparse.Namespace) -> int:
 
 
 def _cmd_coverage(args: argparse.Namespace) -> int:
-    raiser = Path(args.raiser)
-    if not raiser.exists() or not os.access(raiser, os.X_OK):
+    tool = Path(args.tool)
+    if not tool.exists() or not os.access(tool, os.X_OK):
         print(
-            f"kerneldex coverage: error: raiser not executable: {raiser}",
+            f"kerneldex coverage: error: tool not executable: {tool}",
             file=sys.stderr,
         )
         return 2
     csv_path = coverage_mod.run_coverage(
         Path(args.dex_dir),
-        raiser,
-        extra_args=args.raiser_arg or [],
+        tool,
+        extra_args=args.tool_arg or [],
         timeout=args.timeout,
     )
     print(f"[kerneldex] coverage written to {csv_path}")
@@ -111,7 +111,7 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="kerneldex",
         description="Catalog the GPU kernels a Triton workload emits for a "
                     "target ISA, with instruction histograms and optional "
-                    "translator-coverage.",
+                    "per-kernel coverage against an external tool.",
     )
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -153,18 +153,18 @@ def _build_parser() -> argparse.ArgumentParser:
     # coverage -------------------------------------------------------------
     pco = sub.add_parser(
         "coverage",
-        help="Run an external raiser/translator over every captured kernel.",
+        help="Run an external tool over every captured kernel.",
     )
     pco.add_argument("dex_dir",
                      help="dex directory previously populated by ``capture``.")
-    pco.add_argument("--raiser", required=True,
+    pco.add_argument("--tool", required=True,
                      help="Path to an external executable that accepts a "
                           "``.hsaco`` as its first positional argument.")
-    pco.add_argument("--raiser-arg", action="append",
-                     help="Additional argument to forward to the raiser. May "
+    pco.add_argument("--tool-arg", action="append",
+                     help="Additional argument to forward to the tool. May "
                           "be repeated.")
     pco.add_argument("--timeout", type=float, default=300.0,
-                     help="Per-kernel timeout for the raiser subprocess, in "
+                     help="Per-kernel timeout for the tool subprocess, in "
                           "seconds. Timed-out kernels are recorded as "
                           "'timeout:<seconds>' in coverage.csv. Default 300.")
     pco.set_defaults(func=_cmd_coverage)
