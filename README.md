@@ -1,5 +1,7 @@
 # kerneldex
 
+<img src="docs/images/kerneldex-banner.jpg" alt="kerneldex" width="640">
+
 *Catalog the GPU kernels a Triton workload emits for a target ISA, with
 instruction histograms and optional per-kernel coverage against an
 external tool.*
