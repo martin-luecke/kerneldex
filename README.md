@@ -59,7 +59,7 @@ library.
 ## Install
 
 ```
-git clone <remote>   # once you've attached a git remote
+git clone [<remote>   # once you've attached a git remote](https://github.com/martin-luecke/kerneldex.git)
 cd kerneldex
 pip install -e .
 ```
@@ -347,9 +347,3 @@ The test suite is GPU-free; it covers the CLI parser, config validation,
 stdout parsers, and the report renderer. GPU-dependent capture runs are
 left to users' own integration workflows (there is no kerneldex CI
 against a real `gfx*` device yet).
-
----
-
-## License
-
-Apache-2.0. See [`LICENSE`](LICENSE).
